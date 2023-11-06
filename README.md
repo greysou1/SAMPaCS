@@ -1,4 +1,4 @@
-# SAMPaCS: Segment Anything Person and Clothes Silhouettes 
+# SAMPaCS: Segment Anything Model Person and Clothes Silhouettes 
 
 ## Installation
 
