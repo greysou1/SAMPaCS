@@ -1,5 +1,13 @@
 # SAMPaCS: Segment Anything Model Person and Clothes Silhouettes 
 
+<table>
+ <tr>
+  <td align="center"><img src="assets/shirt.gif" width="100%" height="auto" /></td>
+  <td align="center"><img src="assets/person.gif" width="100%" height="auto" /></td>
+  <td align="center"><img src="assets/pant.gif" width="100%" height="auto" /></td>
+ </tr>
+</table>
+
 ## Installation
 
 #### Segment Anything
@@ -35,3 +43,5 @@ Click the links below to download the checkpoint for the corresponding model typ
 - `default or vit_h`: [ViT-H SAM model](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth).
 - `vit_l`: [ViT-L SAM model](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth).
 - `vit_b`: [ViT-B SAM model](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth).
+
+## 
