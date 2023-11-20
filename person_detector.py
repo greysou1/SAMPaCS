@@ -6,6 +6,7 @@ import numpy as np
 import mediapipe as mp
 from tqdm import tqdm
 import torch
+import magic 
 
 from mmcv.fileio import FileClient
 import decord
@@ -16,118 +17,15 @@ def convert_to_builtin_type(obj):
         return int(obj)
     raise TypeError("Object of type {} is not JSON serializable".format(type(obj)))
 
+def filedata(filepath):
+    return magic.from_file(filepath, mime=True)
+
 def save_json(data, json_path):
     with open(json_path, 'w') as json_file:
         json.dump(data, json_file, default=convert_to_builtin_type)
 
     if args.verbose:
         print(f'Pose data saved to {json_path}')
-
-def get_torso_bounding_box(landmarks, width, height, scale_width=1.5, scale_height=1.3):
-    # get the coordinates of the torso landmarks
-    torso_landmarks = [landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value],
-                       landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value],
-                       landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value],
-                       landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value]]
-
-    # calculate the bounding box coordinates for the torso region
-    min_x = min(torso_landmarks, key=lambda landmark: landmark['x'])['x']
-    max_x = max(torso_landmarks, key=lambda landmark: landmark['x'])['x']
-    min_y = min(torso_landmarks, key=lambda landmark: landmark['y'])['y']
-    max_y = max(torso_landmarks, key=lambda landmark: landmark['y'])['y']
-
-    # calculate the center, width, and height of the bounding box
-    center_x = int((min_x + max_x) * width / 2)
-    center_y = int((min_y + max_y) * height / 2)
-    box_width = int((max_x - min_x) * width)
-    box_height = int((max_y - min_y) * height)
-
-    scaled_box_width = int(box_width * scale_width)
-    scaled_box_height = int(box_height * scale_height)
-
-    # calculate the scaled bounding box coordinates
-    scaled_min_x = int(center_x - scaled_box_width / 2)
-    scaled_max_x = int(center_x + scaled_box_width / 2)
-    scaled_min_y = int(center_y - scaled_box_height / 2)
-    scaled_max_y = int(center_y + scaled_box_height / 2)
-
-    return (scaled_min_x, scaled_min_y), (scaled_max_x, scaled_max_y)
-
-def get_prompt_point(landmarks, width, height):
-    # get the x and y coordinates of the shoulder and hip keypoints
-    left_shoulder = landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value]
-    right_shoulder = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]
-    left_hip = landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value]
-    right_hip = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value]
-
-    # calculate the center point
-    center_x = (left_shoulder["x"] + right_shoulder["x"] + left_hip["x"] + right_hip["x"]) / 4
-    center_y = (left_shoulder["y"] + right_shoulder["y"] + left_hip["y"] + right_hip["y"]) / 4
-
-    center_x = center_x * width
-    center_y = center_y * height
-
-    return (center_x, center_y)
-
-def get_pants_bounding_box(landmarks, width, height, scale_width=2, scale_height=1.3):
-    # get the coordinates of the bottom landmarks
-    bottom_landmarks = [landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value],
-                        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value],
-                        landmarks[mp.solutions.pose.PoseLandmark.LEFT_ANKLE.value],
-                        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_ANKLE.value]]
-
-    # calculate the bounding box coordinates for the pants region
-    min_x = min(bottom_landmarks, key=lambda landmark: landmark['x'])['x']
-    max_x = max(bottom_landmarks, key=lambda landmark: landmark['x'])['x']
-    min_y = min(bottom_landmarks, key=lambda landmark: landmark['y'])['y']
-    max_y = max(bottom_landmarks, key=lambda landmark: landmark['y'])['y']
-
-    # calculate the center, width, and height of the bounding box
-    center_x = int((min_x + max_x) * width / 2)
-    center_y = int((min_y + max_y) * height / 2)
-    box_width = int((max_x - min_x) * width)
-    box_height = int((max_y - min_y) * height)
-
-    scaled_box_width = int(box_width * scale_width)
-    scaled_box_height = int(box_height * scale_height)
-
-    # calculate the scaled bounding box coordinates
-    scaled_min_x = int(center_x - scaled_box_width / 2)
-    scaled_max_x = int(center_x + scaled_box_width / 2)
-    scaled_min_y = int(center_y - scaled_box_height / 2)
-    scaled_max_y = int(center_y + scaled_box_height / 2)
-
-    return (scaled_min_x, scaled_min_y), (scaled_max_x, scaled_max_y)
-
-def get_full_body_bounding_box(landmarks, width, height, scale_width=1.5, scale_height=1.4):
-    # get the center of the person using the hips
-    hips = landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value]['x'], landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value]['x']
-    center_x = int(sum(hips) * width / 2)
-    hips_y = landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value]['y'], landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value]['y']
-    center_y = int(sum(hips_y) * height / 2)
-
-    # calculate the distance between the feet and the top of the head
-    foot_points_y = [landmarks[mp.solutions.pose.PoseLandmark.LEFT_ANKLE.value]['y'], landmarks[mp.solutions.pose.PoseLandmark.RIGHT_ANKLE.value]['y']]
-    face_points_y = [landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value]['y'], landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value]['y']]
-    distances_y = [min(foot_points_y) - max(face_points_y), max(foot_points_y) - min(face_points_y)]
-    box_height = int(max(distances_y) * height)
-
-    # calculate the width of the person as the maximum distance between shoulder points and wrist points
-    shoulder_points = [landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value]['x'], landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]['x']]
-    wrist_points = [landmarks[mp.solutions.pose.PoseLandmark.LEFT_WRIST.value]['x'], landmarks[mp.solutions.pose.PoseLandmark.RIGHT_WRIST.value]['x']]
-    distances = [abs(shoulder - wrist) for shoulder in shoulder_points for wrist in wrist_points]
-    box_width = int(max(distances) * width)
-
-    scaled_box_width = int(box_width * scale_width)
-    scaled_box_height = int(box_height * scale_height)
-
-    # calculate the scaled bounding box coordinates
-    scaled_min_x = int(center_x - scaled_box_width / 2)
-    scaled_max_x = int(center_x + scaled_box_width / 2)
-    scaled_min_y = int(center_y - scaled_box_height / 2)
-    scaled_max_y = int(center_y + scaled_box_height / 2)
-
-    return (scaled_min_x, scaled_min_y), (scaled_max_x, scaled_max_y)
 
 def load_video(video_path):
     file_obj = inot.BytesIO(file_client.get(video_path))
@@ -160,67 +58,37 @@ def process_image(image_path, json_dir, model):
     save_json(info, json_path)
     return info
 
-def process_video(video_path, json_dir, model,
-                  confidence_threshold=0.8,
-                  scale_torso_width=1.8, scale_pants_width=2, scale_person_width=1.5,
-                  scale_torso_height=1.5, scale_pants_height=1.3, scale_person_height=1.4):
-
+def process_video(video_path, json_dir, model):
     imgs = load_video(video_path)
-    results = model(imgs, size=640)
+    data = {}
+    for i, img in enumerate(imgs):
+        width, height, _ = img.shape
+        results = model([img], size=640)
 
-    
+        if len(results.xyxy[0]) == 0:
+            print(video_path)
+            return 0
+        x0, y0, x1, y1, _, _ = results.xyxy[0][0].cpu().numpy().astype(int)
 
-    pose_data = {}
+        data[i] = {
+            'person_bb': [[x0, y0, x1, y1]]
+        }
 
-    for i, frame in tqdm(enumerate(imgs)):
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        results = mp_pose.process(frame_rgb)
-
-        if results.pose_landmarks is not None:
-            landmarks = []
-            confidences = []
-            for landmark in results.pose_landmarks.landmark:
-                landmarks.append({
-                    'x': round(landmark.x, 5),
-                    'y': round(landmark.y, 5),
-                })
-                confidences.append(round(landmark.visibility, 4))
-
-            mean_confidence = np.mean(confidences)
-
-            if mean_confidence >= confidence_threshold:
-                prompt_point = get_prompt_point(landmarks, width, height)
-                torso_bb = get_torso_bounding_box(landmarks, width, height, scale_width=scale_torso_width, scale_height=scale_torso_height)
-                pants_bb = get_pants_bounding_box(landmarks, width, height, scale_width=scale_pants_width, scale_height=scale_pants_height)
-                person_bb = get_full_body_bounding_box(landmarks, width, height, scale_width=scale_person_width, scale_height=scale_person_height)
-                
-                pose_data[frame_count] = {
-                    'torso_bb': torso_bb,
-                    'pants_bb': pants_bb,
-                    'person_bb': person_bb,
-                    'landmarks': landmarks,
-                    'confidences': confidences,
-                    'prompt_point': prompt_point
-                }
-
-    video_info = {
-        'fps': fps,
+    info = {
         'width': width,
         'height': height,
-        'pose_data': pose_data
+        'pose_data': data
     }
-
     json_path = os.path.join(json_dir, Path(video_path).stem+".json")
-    save_json(video_info, json_path)
-    return video_info
+    save_json(info, json_path)
+    return info
 
 if __name__ == "__main__": 
 
     parser = argparse.ArgumentParser(description="Segment Anything Model Person and Clothes Silhouettes")
 
-    parser.add_argument("--filepath",  help="path to input video file", type=str, required=False)
-    parser.add_argument("--jsonsavedir",  help="path where to save the json file", type=str, required=False)
+    parser.add_argument("--filepath",  help="path to input video file", type=str, required=True)
+    parser.add_argument("--jsonsavedir",  help="path where to save the json file", type=str, required=True)
     parser.add_argument("--verbose",  help="default: None, shows the output json savepath", action='store_true')
 
     parser.add_argument('--confidence', type=int, default=0.8)
@@ -240,20 +108,20 @@ if __name__ == "__main__":
     # jsonsavepath = f"casia/jsons/{filename}.json"
 
     model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
-    # file_client = FileClient(io_backend='disk')
 
-    folderpath = "/home/c3-0/datasets/LTCC/LTCC_ReID/query/"
-    json_root = "outputs/LTCC/jsons/query"
-    for img_path in os.listdir(folderpath):
-        img_path = os.path.join(folderpath, img_path)
-        # json_path = os.path.join(folderpath, img_path.replace('.png', '.json'))
-        process_image(img_path, json_root, model)
+    if 'image' in filedata(args.filepath):
+        process_image(args.filepath, args.jsonsavedir, model)
+    if 'video' in filedata(args.filepath):
+        process_video(args.filepath, args.jsonsavedir, model)
+
+    # folderpath = "/home/c3-0/datasets/LTCC/LTCC_ReID/query/"
+    # json_root = "outputs/LTCC/jsons/query"
+    # for img_path in os.listdir(folderpath):
+    #     img_path = os.path.join(folderpath, img_path)
+        
+    #     process_image(img_path, json_root, model)
     
-    # process_video(args.filepath, args.jsonsavedir, model, confidence_threshold=args.confidence,
-    #               scale_torso_width=args.scale_torso_width, scale_torso_height=args.scale_torso_height,
-    #               scale_pants_width=args.scale_pants_width, scale_pants_height=args.scale_pants_height,
-    #               scale_person_width=args.scale_person_width, scale_person_height=args.scale_person_height)
+    # process_video(args.filepath, args.jsonsavedir, model)
 
 
-# python pose.py --filepath "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/084-bg-01-000.avi" --jsonsavedir "outputs/jsons"
 # python person_detector.py --filepath "/home/c3-0/datasets/LTCC/LTCC_ReID/train/094_1_c9_015923.png" --jsonsavedir "outputs/jsons"

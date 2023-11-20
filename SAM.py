@@ -8,6 +8,10 @@ from PIL import Image
 import torch
 from segment_anything import sam_model_registry
 import moviepy.video.io.ImageSequenceClip
+import magic
+
+def filedata(filepath):
+    return magic.from_file(filepath, mime=True)
 
 class SAM:
     def __init__(self, 
@@ -235,21 +239,15 @@ class SAM:
         # 3. batch inference
         # if prompt_data:
         person_bbox = prompt_data[0]["person_bb"] # [136, 38, 172, 161]
-            # shirt_bbox = prompt_data[0]["torso_bb"] # [0, 144, 87, 288]
-            # pant_bbox = prompt_data[0]["pants_bb"] # [144, 94, 164, 147]
-            # prompt_point = prompt_data[0]["prompt_point"] # [154.5152, 83.71560000000001]
-            # pose_points = prompt_data[0]["landmarks"] # ...
-        # else:
-        #     person_bbox = [0,0,desired_width, desired_height]
-        #     prompt_point = desired_width / 2, desired_height / 2
-            
-        #     shirt_height_start = max(desired_height // 2  - padding, 0)
-        #     pant_height_end = min(desired_height // 2 + padding, desired_height)
+        x1, y1, x2, y2 = person_bbox
+        box_height = abs(y2 - y1)
+        box_width = abs(x2 - x1)
+        
+        shirt_height_start = max(box_height // 2  - padding, 0)
+        pant_height_end = min(box_height // 2 + padding, box_height)
 
-        #     shirt_bbox = [0,0, desired_width, pant_height_end]
-        #     # shirt_bbox = [0,shirt_height_start, desired_width, desired_height]
-        #     # pant_bbox = [0,0, desired_width, pant_height_end]
-        #     pant_bbox =  [0,shirt_height_start, desired_width, desired_height]
+        shirt_bbox = [x1, y1, box_width, pant_height_end]
+        pant_bbox =  [x1, shirt_height_start, box_width, box_height]
 
         input_data = {}
         input_data['image'] = torch.as_tensor(img, device=self.sam.device).permute(2, 0, 1).contiguous()
@@ -258,12 +256,6 @@ class SAM:
 
         if prompt_sil:
             prompt_points = self.get_prompt_points(prompt_sil, num=50)
-            # img_copy = img.copy()
-            # for pt in prompt_points:
-            #     x, y = pt
-            #     cv2.circle(img_copy, (y, x), 1, (0, 255, 0), -1)
-            #     cv2.imwrite("debug.png", img_copy)
-
             input_data['input_point'] =  prompt_points
         batched_input = []
         if 'bbox' in self.prompts:
@@ -373,6 +365,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument("--filepath",  help="path to input video file", type=str, required=False)
+    parser.add_argument("--silpath",  help="path to input video file", type=str, required=False)
     parser.add_argument("--jsonpath",  help="path to input json file, this file is generated using the pose.py script", type=str, default=None, required=False)
     parser.add_argument("--verbose",  help="default: None, use to show the MoviePy library's logger output, shows the output savepath", action='store_true')
     parser.add_argument("--savedir",  help="path to directory where the silhouettes are to be saved", type=str, required=True)
@@ -389,6 +382,16 @@ if __name__ == "__main__":
                 mask_names=list(set(args.masks)),
                 prompts=list(set(args.prompts)))
     
+    arguments_dict = {
+                    'imagepath': args.filepath,
+                    'jsonpath': args.jsonpath, 
+                    'savedir': args.savedir, 
+    }
+    if args.silpath:
+        arguments_dict['prompt_sil'] = args.silpath
+    gsam.extract_image_masks(**arguments_dict)
+
+    '''
     # filepath = "DatasetB-1/video/001-nm-04-144.avi"
     # jsonpath = "casiab/001-nm-04-144.json"
     # savedir = "outputs/casiab" 
@@ -397,17 +400,20 @@ if __name__ == "__main__":
     # else:
         # gsam.extract_video_masks(args.filepath, jsonpath=args.jsonpath, savedir=args.savedir)
 
-    folderpath = "/home/c3-0/datasets/LTCC/LTCC_ReID/query/"
-    json_root = "/home/prudvik/sampacs/outputs/LTCC/jsons/query"
-    sil_root = "/home/c3-0/datasets/ID-Dataset/ltcc/query/"
-    for img_path in tqdm(os.listdir(folderpath)):
-        sil_path = os.path.join(sil_root, img_path.replace('.png', '_sil.png'))
-        json_path = os.path.join(json_root, img_path.replace('.png', '.json'))
-        img_path = os.path.join(folderpath, img_path)
+    # gsam.extract_image_masks(args.filepath, jsonpath=args.jsonpath, savedir=args.savedir, prompt_sil=args.silpath)
+
+    # folderpath = "/home/c3-0/datasets/LTCC/LTCC_ReID/query/"
+    # json_root = "/home/prudvik/sampacs/outputs/LTCC/jsons/query"
+    # sil_root = "/home/c3-0/datasets/ID-Dataset/ltcc/query/"
+    # for img_path in tqdm(os.listdir(folderpath)):
+    #     sil_path = os.path.join(sil_root, img_path.replace('.png', '_sil.png'))
+    #     json_path = os.path.join(json_root, img_path.replace('.png', '.json'))
+    #     img_path = os.path.join(folderpath, img_path)
         
-        if not os.path.exists(json_path): continue
-        if not os.path.exists(sil_path): continue
-        gsam.extract_image_masks(img_path, jsonpath=json_path, savedir=args.savedir, prompt_sil=sil_path)
+    #     if not os.path.exists(json_path): continue
+    #     if not os.path.exists(sil_path): continue
+    #     gsam.extract_image_masks(img_path, jsonpath=json_path, savedir=args.savedir, prompt_sil=sil_path)
+    '''
     
 
 # python SAM.py --filepath "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/001-bg-01-000.avi" \

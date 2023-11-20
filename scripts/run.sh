@@ -18,10 +18,10 @@ module add cuda/12.1
 
 # conda activate gsam
 
-dir="/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/"
+dir="/home/c3-0/datasets/LTCC/LTCC_ReID/train/"
 
 for item in "$dir"*; do    
-    python pose.py --filepath "$item" \
+    python person_detector.py --filepath "$item" \
                 --jsonsavedir "outputs/jsons"
 done
 
@@ -34,4 +34,4 @@ for item in "$dir"*; do
                 --masks "shirt" \
                 --masks "pant" \
                 --prompts "bbox"
-done            
+done 
