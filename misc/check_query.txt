@@ -1,0 +1,10 @@
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/008_2_c6_013718.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/026_1_c11_015587.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/028_2_c11_008712.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/028_8_c9_008866.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/046_2_c6_002422.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/082_1_c9_005134.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/107_1_c2_017048.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/118_1_c6_014567.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/137_1_c3_000842.png
+/home/c3-0/datasets/LTCC/LTCC_ReID/query/141_7_c6_013448.png

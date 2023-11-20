@@ -36,14 +36,16 @@ class SAM:
         for key, item in data["pose_data"].items():
             new_data[int(key)] = {}
             # bounding boxes
-            new_data[int(key)]['person_bb'] = [item for sublist in item['person_bb'] for item in sublist]
-            new_data[int(key)]['torso_bb'] = [item for sublist in item['torso_bb'] for item in sublist]
-            new_data[int(key)]['pants_bb'] = [item for sublist in item['pants_bb'] for item in sublist]
             
-            # the center point of torso to use as prompt point
-            new_data[int(key)]['prompt_point'] = item['prompt_point']
-            # (x, y) values of 22 landmarks that can be used as prompt points
-            new_data[int(key)]['landmarks'] = [[sublist['x'] * w, sublist['y'] * h] for sublist in item['landmarks']] # cd: coords_dict
+            for bb_key in item.keys():
+                if bb_key == 'prompt_point':
+                    # the center point of torso to use as prompt point
+                    new_data[int(key)]['prompt_point'] = item['prompt_point']
+                elif bb_key == 'landmarks':
+                    # (x, y) values of 22 landmarks that can be used as prompt points
+                    new_data[int(key)]['landmarks'] = [[sublist['x'] * w, sublist['y'] * h] for sublist in item['landmarks']] # cd: coords_dict
+                else:
+                    new_data[int(key)][bb_key] = [item for sublist in item[bb_key] for item in sublist]
 
         return new_data
     
@@ -188,24 +190,31 @@ class SAM:
         
         self.save_clothing_data(videoname, clothing_bboxes, clothing_masks, mask_save_fol_paths)
     
+    def get_prompt_points(self, g_image, num=10):
+        # Read the binary image
+        image = cv2.imread(g_image, cv2.IMREAD_GRAYSCALE)
+        # Find the coordinates of white pixels
+        coords = np.column_stack(np.where(image == 255))
+        coords = [coords[a] for a in range(0, len(coords), len(coords)//num)]
+        return coords
+    
     def extract_image_masks(self, imagepath, 
                             jsonpath=None, 
                             savedir=None, scaling_factor=1,
+                            prompt_sil=None,
                             padding= 10):
         
         imagename = Path(imagepath).stem
 
         # 1. read frames
-        img = Image.open(imagepath).convert('RGB')
-        width, height = img.size
+        img = cv2.imread(imagepath) #Image.open(imagepath).convert('RGB')
+        width, height, _ = img.shape
 
         # desired_width = 192
         # desired_height = 384 
-        desired_width = int(width * scaling_factor)
-        desired_height = int(height * scaling_factor)
-        img = img.resize((desired_width, desired_height))
-        img.save("test.png")
-        
+        # desired_width = int(width * scaling_factor)
+        # desired_height = int(height * scaling_factor)
+        # img = img.resize((desired_width, desired_height))        
 
         # 2. load bboxes
         prompt_data = None
@@ -224,31 +233,38 @@ class SAM:
             mask_save_fol_paths[item] = savepath
 
         # 3. batch inference
-        if prompt_data:
-            # prompt_data[35]
-            person_bbox = prompt_data[frame_i]["person_bb"] # [136, 38, 172, 161]
-            shirt_bbox = prompt_data[frame_i]["torso_bb"] # [0, 144, 87, 288]
-            pant_bbox = prompt_data[frame_i]["pants_bb"] # [144, 94, 164, 147]
-            prompt_point = prompt_data[frame_i]["prompt_point"] # [154.5152, 83.71560000000001]
-            pose_points = prompt_data[frame_i]["landmarks"] # ...
-        else:
-            person_bbox = [0,0,desired_width, desired_height]
-            prompt_point = desired_width / 2, desired_height / 2
+        # if prompt_data:
+        person_bbox = prompt_data[0]["person_bb"] # [136, 38, 172, 161]
+            # shirt_bbox = prompt_data[0]["torso_bb"] # [0, 144, 87, 288]
+            # pant_bbox = prompt_data[0]["pants_bb"] # [144, 94, 164, 147]
+            # prompt_point = prompt_data[0]["prompt_point"] # [154.5152, 83.71560000000001]
+            # pose_points = prompt_data[0]["landmarks"] # ...
+        # else:
+        #     person_bbox = [0,0,desired_width, desired_height]
+        #     prompt_point = desired_width / 2, desired_height / 2
             
-            shirt_height_start = max(desired_height // 2  - padding, 0)
-            pant_height_end = min(desired_height // 2 + padding, desired_height)
+        #     shirt_height_start = max(desired_height // 2  - padding, 0)
+        #     pant_height_end = min(desired_height // 2 + padding, desired_height)
 
-            shirt_bbox = [0,0, desired_width, pant_height_end]
-            # shirt_bbox = [0,shirt_height_start, desired_width, desired_height]
-            # pant_bbox = [0,0, desired_width, pant_height_end]
-            pant_bbox =  [0,shirt_height_start, desired_width, desired_height]
+        #     shirt_bbox = [0,0, desired_width, pant_height_end]
+        #     # shirt_bbox = [0,shirt_height_start, desired_width, desired_height]
+        #     # pant_bbox = [0,0, desired_width, pant_height_end]
+        #     pant_bbox =  [0,shirt_height_start, desired_width, desired_height]
 
-        img = np.asarray(img)
         input_data = {}
         input_data['image'] = torch.as_tensor(img, device=self.sam.device).permute(2, 0, 1).contiguous()
         input_data['original_size'] = img.shape[:2]
         input_data['input_label'] =  np.array([1]) # 1 is for foreground, 0 is for background
 
+        if prompt_sil:
+            prompt_points = self.get_prompt_points(prompt_sil, num=50)
+            # img_copy = img.copy()
+            # for pt in prompt_points:
+            #     x, y = pt
+            #     cv2.circle(img_copy, (y, x), 1, (0, 255, 0), -1)
+            #     cv2.imwrite("debug.png", img_copy)
+
+            input_data['input_point'] =  prompt_points
         batched_input = []
         if 'bbox' in self.prompts:
             bboxes_t = {}
@@ -277,10 +293,11 @@ class SAM:
                 print("ERROR! 'point' and 'pose' prompts can only be used for extracting person silhouettes!")
                 quit()
 
+        # print(input_data.keys())
         batched_input.append(input_data)
 
         # b. inference batched input
-        batch_output = self.sam(batched_input, multimask_output=True)
+        batch_output = self.sam(batched_input, multimask_output=False)
         gc.collect()
             
         # c. index batched output
@@ -292,7 +309,6 @@ class SAM:
             clothing_masks = masks_dict
 
         self.save_clothing_data_as_Image(imagename, clothing_bboxes, clothing_masks, mask_save_fol_paths)
-    
     
     def save_clothing_data(self, videoname, clothing_bboxes, clothing_masks, mask_save_paths_vid):
         """
@@ -356,7 +372,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Segment Anything Model Person and Clothes Silhouettes")
 
     parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument("--filepath",  help="path to input video file", type=str, required=True)
+    parser.add_argument("--filepath",  help="path to input video file", type=str, required=False)
     parser.add_argument("--jsonpath",  help="path to input json file, this file is generated using the pose.py script", type=str, default=None, required=False)
     parser.add_argument("--verbose",  help="default: None, use to show the MoviePy library's logger output, shows the output savepath", action='store_true')
     parser.add_argument("--savedir",  help="path to directory where the silhouettes are to be saved", type=str, required=True)
@@ -376,11 +392,23 @@ if __name__ == "__main__":
     # filepath = "DatasetB-1/video/001-nm-04-144.avi"
     # jsonpath = "casiab/001-nm-04-144.json"
     # savedir = "outputs/casiab" 
-    if args.image:
-        gsam.extract_image_masks(args.filepath, jsonpath=args.jsonpath, savedir=args.savedir)
-    else:
-        gsam.extract_video_masks(args.filepath, jsonpath=args.jsonpath, savedir=args.savedir)
+    # if args.image:
+    #     gsam.extract_image_masks(args.filepath, jsonpath=args.jsonpath, savedir=args.savedir)
+    # else:
+        # gsam.extract_video_masks(args.filepath, jsonpath=args.jsonpath, savedir=args.savedir)
 
+    folderpath = "/home/c3-0/datasets/LTCC/LTCC_ReID/query/"
+    json_root = "/home/prudvik/sampacs/outputs/LTCC/jsons/query"
+    sil_root = "/home/c3-0/datasets/ID-Dataset/ltcc/query/"
+    for img_path in tqdm(os.listdir(folderpath)):
+        sil_path = os.path.join(sil_root, img_path.replace('.png', '_sil.png'))
+        json_path = os.path.join(json_root, img_path.replace('.png', '.json'))
+        img_path = os.path.join(folderpath, img_path)
+        
+        if not os.path.exists(json_path): continue
+        if not os.path.exists(sil_path): continue
+        gsam.extract_image_masks(img_path, jsonpath=json_path, savedir=args.savedir, prompt_sil=sil_path)
+    
 
 # python SAM.py --filepath "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/001-bg-01-000.avi" \
 #               --jsonpath "outputs/jsons/001-bg-01-000.json" \
@@ -389,3 +417,9 @@ if __name__ == "__main__":
 #               --masks "shirt" \
 #               --masks "pant" \
 #               --prompts "bbox"
+# python SAM.py --filepath "/home/c3-0/datasets/LTCC/LTCC_ReID/train/094_1_c9_015923.png" --savedir "outputs/silhouettes3" --image \
+#                 --masks "person" \
+#                 --prompts "bbox" \
+#                 --jsonpath "/home/prudvik/sampacs/outputs/jsons/094_1_c9_015923.json"
+
+# python SAM.py --savedir "outputs/LTCC/silhouettes/query" --image --masks "person" --prompts "bbox"

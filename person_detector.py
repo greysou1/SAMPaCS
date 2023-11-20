@@ -5,10 +5,20 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from tqdm import tqdm
+import torch
+
+from mmcv.fileio import FileClient
+import decord
+import io as inot
+
+def convert_to_builtin_type(obj):
+    if isinstance(obj, np.int64):
+        return int(obj)
+    raise TypeError("Object of type {} is not JSON serializable".format(type(obj)))
 
 def save_json(data, json_path):
     with open(json_path, 'w') as json_file:
-        json.dump(data, json_file)
+        json.dump(data, json_file, default=convert_to_builtin_type)
 
     if args.verbose:
         print(f'Pose data saved to {json_path}')
@@ -119,24 +129,50 @@ def get_full_body_bounding_box(landmarks, width, height, scale_width=1.5, scale_
 
     return (scaled_min_x, scaled_min_y), (scaled_max_x, scaled_max_y)
 
-def process_video(video_path, json_dir,
+def load_video(video_path):
+    file_obj = inot.BytesIO(file_client.get(video_path))
+    container = decord.VideoReader(file_obj, num_threads=1)
+    container = [img.asnumpy() for img in container]
+    return container
+
+def process_image(image_path, json_dir, model):
+    img = cv2.imread(image_path)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    width, height, _ = img.shape
+    results = model([img], size=640)
+
+    if len(results.xyxy[0]) == 0:
+        print(image_path)
+        return 0
+    x0, y0, x1, y1, _, _ = results.xyxy[0][0].cpu().numpy().astype(int)
+
+    data = {}
+    data[0] = {
+        'person_bb': [[x0, y0, x1, y1]]
+    }
+
+    info = {
+        'width': width,
+        'height': height,
+        'pose_data': data
+    }
+    json_path = os.path.join(json_dir, Path(image_path).stem+".json")
+    save_json(info, json_path)
+    return info
+
+def process_video(video_path, json_dir, model,
                   confidence_threshold=0.8,
                   scale_torso_width=1.8, scale_pants_width=2, scale_person_width=1.5,
                   scale_torso_height=1.5, scale_pants_height=1.3, scale_person_height=1.4):
 
-    mp_pose = mp.solutions.pose.Pose()
+    imgs = load_video(video_path)
+    results = model(imgs, size=640)
 
-    cap = cv2.VideoCapture(video_path)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
 
     pose_data = {}
 
-    for frame_count in tqdm(range(num_frames)):
-        ret, frame = cap.read()
-
+    for i, frame in tqdm(enumerate(imgs)):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         results = mp_pose.process(frame_rgb)
@@ -179,66 +215,15 @@ def process_video(video_path, json_dir,
     save_json(video_info, json_path)
     return video_info
 
-def process_image(image_path, json_dir,
-                  confidence_threshold=0.8,
-                  scale_torso_width=1.8, scale_pants_width=2, scale_person_width=1.5,
-                  scale_torso_height=1.5, scale_pants_height=1.3, scale_person_height=1.4):
-    
-    frame = cv2.imread(image_path)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    height, width, _ = frame.shape
-
-    mp_pose = mp.solutions.pose.Pose()
-    results = mp_pose.process(frame_rgb)
-
-    pose_data = {}
-    landmarks = []
-    confidences = []
-    for landmark in results.pose_landmarks.landmark:
-        landmarks.append({
-            'x': round(landmark.x, 5),
-            'y': round(landmark.y, 5),
-        })
-        confidences.append(round(landmark.visibility, 4))
-
-    mean_confidence = np.mean(confidences)
-    print(mean_confidence)
-
-    if mean_confidence >= confidence_threshold:
-        prompt_point = get_prompt_point(landmarks, width, height)
-        torso_bb = get_torso_bounding_box(landmarks, width, height, scale_width=scale_torso_width, scale_height=scale_torso_height)
-        pants_bb = get_pants_bounding_box(landmarks, width, height, scale_width=scale_pants_width, scale_height=scale_pants_height)
-        person_bb = get_full_body_bounding_box(landmarks, width, height, scale_width=scale_person_width, scale_height=scale_person_height)
-        
-        pose_data[0] = {
-            'torso_bb': torso_bb,
-            'pants_bb': pants_bb,
-            'person_bb': person_bb,
-            'landmarks': landmarks,
-            'confidences': confidences,
-            'prompt_point': prompt_point
-        }
-
-    video_info = {
-        'fps': 'image',
-        'width': width,
-        'height': height,
-        'pose_data': pose_data
-    }
-
-    json_path = os.path.join(json_dir, Path(image_path).stem+".json")
-    save_json(video_info, json_path)
-    return video_info
-
 if __name__ == "__main__": 
 
     parser = argparse.ArgumentParser(description="Segment Anything Model Person and Clothes Silhouettes")
 
-    parser.add_argument("--filepath",  help="path to input video file", type=str, required=True)
-    parser.add_argument("--jsonsavedir",  help="path where to save the json file", type=str, required=True)
+    parser.add_argument("--filepath",  help="path to input video file", type=str, required=False)
+    parser.add_argument("--jsonsavedir",  help="path where to save the json file", type=str, required=False)
     parser.add_argument("--verbose",  help="default: None, shows the output json savepath", action='store_true')
 
-    parser.add_argument('--confidence', type=float, default=0.7)
+    parser.add_argument('--confidence', type=int, default=0.8)
 
     parser.add_argument('--scale_torso_width', type=int, default=1.5)
     parser.add_argument('--scale_torso_height', type=int, default=1.3)
@@ -249,24 +234,26 @@ if __name__ == "__main__":
     parser.add_argument('--scale_person_width', type=int, default=1.5)    
     parser.add_argument('--scale_person_height', type=int, default=1.4)
 
-    parser.add_argument("--image",  help="input: image", action='store_true')
-
     args = parser.parse_args()
 
     # filepath = f"DatasetB-1/video/{filename}.avi"
     # jsonsavepath = f"casia/jsons/{filename}.json"
 
-    print(args.image)
-    if args.image:
-        process_image(args.filepath, args.jsonsavedir, confidence_threshold=args.confidence, 
-                  scale_torso_width=args.scale_torso_width, scale_torso_height=args.scale_torso_height,
-                  scale_pants_width=args.scale_pants_width, scale_pants_height=args.scale_pants_height,
-                  scale_person_width=args.scale_person_width, scale_person_height=args.scale_person_height)
-    else:
-        process_video(args.filepath, args.jsonsavedir, confidence_threshold=args.confidence, 
-                  scale_torso_width=args.scale_torso_width, scale_torso_height=args.scale_torso_height,
-                  scale_pants_width=args.scale_pants_width, scale_pants_height=args.scale_pants_height,
-                  scale_person_width=args.scale_person_width, scale_person_height=args.scale_person_height)
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+    # file_client = FileClient(io_backend='disk')
+
+    folderpath = "/home/c3-0/datasets/LTCC/LTCC_ReID/query/"
+    json_root = "outputs/LTCC/jsons/query"
+    for img_path in os.listdir(folderpath):
+        img_path = os.path.join(folderpath, img_path)
+        # json_path = os.path.join(folderpath, img_path.replace('.png', '.json'))
+        process_image(img_path, json_root, model)
+    
+    # process_video(args.filepath, args.jsonsavedir, model, confidence_threshold=args.confidence,
+    #               scale_torso_width=args.scale_torso_width, scale_torso_height=args.scale_torso_height,
+    #               scale_pants_width=args.scale_pants_width, scale_pants_height=args.scale_pants_height,
+    #               scale_person_width=args.scale_person_width, scale_person_height=args.scale_person_height)
 
 
-# python pose.py --filepath "/home/c3-0/datasets/LTCC/LTCC_ReID/train/094_1_c9_015923.png" --jsonsavedir "outputs/jsons" --image --confidence 0.7
+# python pose.py --filepath "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/084-bg-01-000.avi" --jsonsavedir "outputs/jsons"
+# python person_detector.py --filepath "/home/c3-0/datasets/LTCC/LTCC_ReID/train/094_1_c9_015923.png" --jsonsavedir "outputs/jsons"

@@ -1,2 +1,4 @@
 sam_vit_h_4b8939.pth
+yolov5s.pt
 outputs/silhouettes/**
+outputs/LTCC/**
